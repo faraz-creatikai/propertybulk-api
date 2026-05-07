@@ -79,7 +79,7 @@ export const syncCallLogsInternal = async () => {
   calledTime: toISODate(log.created_at),
 
   recordingUrl: String(log.call_recording_url ?? ""),
-  transcript: String(log.transcript ?? ""),
+  transcript: String(log.call_transcript ?? ""),
   summary: String(log.call_summary ?? ""),
   sentiment: String(log.call_sentiment ?? ""),
 

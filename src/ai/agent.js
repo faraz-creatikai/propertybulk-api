@@ -1,9 +1,12 @@
 import { gemini } from "../config/gemini.js";
 import { openai } from "../config/openai.js";
 import { callingAgentSystemPrompt } from "./prompts/callingAgentPrompt.js";
+import { dataminingPrompt, miningDataPrompt } from "./prompts/dataminingAgentPrompt.js";
 import { followupPrompt } from "./prompts/followupPrompt.js";
 import { keywordSearchPrompt } from "./prompts/keywordSearchPrompt.js";
+import { propertyRecommendationPrompt } from "./prompts/propertyRecommendationPrompt.js";
 import { qualifyCustomerPrompt } from "./prompts/qualifyCustomerPrompt.js";
+import { socialAgentPrompt } from "./prompts/socialAgentPrompt.js";
 
 
 export function safeJsonParse(raw) {
@@ -22,7 +25,6 @@ export function safeJsonParse(raw) {
     return null;
   }
 }
-
 
 export async function keywordSearchAgent(userPrompt) {
   const response = await gemini.models.generateContent({
@@ -132,10 +134,9 @@ ${JSON.stringify(userPrompt, null, 2)}`
   return safeJsonParse(jsonMatch[0]);
 }
 
-
 export async function CallingAgent(userPrompt) {
   const response = await gemini.models.generateContent({
-    model: "models/gemini-2.5-flash",
+    model: "models/gemini-2.5-flash-lite",
     contents: [
       {
         role: "user",
@@ -152,6 +153,101 @@ ${JSON.stringify(userPrompt, null, 2)}`
 
   const raw = response?.text;
   //console.log(" raw ", raw)
+
+  if (!raw || !raw.trim()) {
+    throw new Error("AI returned empty response");
+  }
+
+  // Extract JSON safely
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+  if (!jsonMatch) {
+    throw new Error("Invalid AI response format");
+  }
+
+  return safeJsonParse(jsonMatch[0]);
+}
+
+export async function PropertyRecommendationAgent(userPrompt) {
+  const response = await gemini.models.generateContent({
+    model: "models/gemini-2.5-flash-lite",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `${propertyRecommendationPrompt}
+DATA:
+${JSON.stringify(userPrompt, null, 2)}`
+          }
+        ]
+      }
+    ],
+  });
+
+  const raw = response?.text;
+  //console.log(" raw ", raw)
+
+  if (!raw || !raw.trim()) {
+    throw new Error("AI returned empty response");
+  }
+
+  // Extract JSON safely
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+
+  if (!jsonMatch) {
+    throw new Error("Invalid AI response format");
+  }
+
+  return safeJsonParse(jsonMatch[0]);
+}
+
+export async function DataMiningAgent(data) {
+  const response = await gemini.models.generateContent({
+    model: "models/gemini-2.5-flash-lite",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `
+${dataminingPrompt}
+DATA:
+${JSON.stringify(data, null, 2)}
+            `
+          }
+        ]
+      }
+    ],
+  });
+
+  const raw = response?.text;
+
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid AI response");
+
+  return JSON.parse(jsonMatch[0]);
+}
+
+export async function MiningDataAgent(userPrompt) {
+  const response = await gemini.models.generateContent({
+    model: "models/gemini-2.5-flash-lite",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `${miningDataPrompt}
+DATA:
+${JSON.stringify(userPrompt, null, 2)}`
+          }
+        ]
+      }
+    ],
+  });
+
+  const raw = response?.text;
+  console.log(" raw ", raw)
 
   if (!raw || !raw.trim()) {
     throw new Error("AI returned empty response");
@@ -191,4 +287,32 @@ export async function followupAgentOpenai(userPrompt) {
   }
 
   return safeJsonParse(jsonMatch[0]);
+}
+
+
+export async function SocialContentAgent(payload) {
+    const response = await gemini.models.generateContent({
+    model: "models/gemini-2.5-flash-lite",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `
+${socialAgentPrompt}
+DATA:
+${JSON.stringify(payload, null, 2)}
+            `
+          }
+        ]
+      }
+    ],
+  });
+
+  const raw = response?.text;
+
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid AI response");
+
+  return JSON.parse(jsonMatch[0]);
 }

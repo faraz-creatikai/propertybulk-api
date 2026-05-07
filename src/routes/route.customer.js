@@ -15,6 +15,12 @@ import {
   startCall,
   getCallLogs,
   getCallReport,
+  deleteCallLogById,
+  getRecommendedCustomer,
+  dataMining,
+  getClosedDeals,
+  closeDeal,
+  reopenDeal,
 } from "../controllers/controller.customer.js";
 
 import upload from "../config/multer.js";
@@ -39,12 +45,14 @@ customerRoutes.use(protectRoute);
 // 🧭 Base CRUD Routes
 customerRoutes.get("/today", getTodayCustomers);
 customerRoutes.get("/getcalllogs",getCallLogs);
-customerRoutes.get("/get-call-report",getCallReport)
+customerRoutes.get("/get-call-report",getCallReport);
+customerRoutes.get("/data-mining", dataMining);
 customerRoutes.get("/", getCustomer);
-customerRoutes.get("/:id", getCustomerById);
+
 
 customerRoutes.post("/check-duplicates", checkDuplicateContacts);
 customerRoutes.post("/qualification-agent", qualifyCustomer);
+customerRoutes.post("/recommended-customers",getRecommendedCustomer);
 
 customerRoutes.post("/agent-call", startCall);
 
@@ -97,5 +105,15 @@ customerRoutes.post(
 );
 
 customerRoutes.get("/no, checkPhoneExists");
+
+//call log delete route 
+customerRoutes.delete("/delete-calllog/:id", deleteCallLogById);
+
+//deal closing routes
+customerRoutes.get("/closed-deals", protectRoute, getClosedDeals);
+customerRoutes.post("/close-deal/:id",protectRoute,closeDeal);
+customerRoutes.post("/reopen-deal/:id",protectRoute,reopenDeal);
+
+customerRoutes.get("/:id", getCustomerById);
 
 export default customerRoutes;
