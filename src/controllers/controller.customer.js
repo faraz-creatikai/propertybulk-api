@@ -557,50 +557,47 @@ export const getCustomer = async (req, res, next) => {
       orderBy.push({ createdAt: "desc" });
     }
 
-    // --------------------------------------------
-    // MAIN FETCH — two strategies based on ContactNumber
-    // --------------------------------------------
-    let customers;
-    let totalRecords;
+// --------------------------------------------
+// MAIN FETCH — two strategies based on ContactNumber
+// --------------------------------------------
+let customers;
+let totalRecords;
 
-    if (!ContactNumber) {
-      // ── TWO-STEP DISTINCT PAGINATION ──────────────────────────
-      // Step 1: fetch only IDs with distinct — no relations, very fast
-      const allDistinctIds = await prisma.customer.findMany({
-        where,
-        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-        distinct: ["ContactNumber"],
-        select: { id: true },  // ← only IDs, minimal memory
-      });
+if (!ContactNumber) {
+  // Step 1: all distinct IDs only — lightweight
+  const allDistinctIds = await prisma.customer.findMany({
+    where,
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    distinct: ["ContactNumber"],
+    select: { id: true },
+  });
 
-      // Total count of distinct records (replaces the old prisma.count)
-      totalRecords = allDistinctIds.length;
+  totalRecords = allDistinctIds.length;
 
-      // Step 2: paginate the ID list in JS — cheap, just strings
-      const pageIds = allDistinctIds
-        .slice(offset, offset + REQUIRED)
-        .map(r => r.id);
+  // Step 2: paginate in JS only if Limit was actually provided
+  const pageIds = Limit !== undefined
+    ? allDistinctIds.slice(offset, offset + REQUIRED).map(r => r.id)
+    : allDistinctIds.slice(offset).map(r => r.id); // ← no upper bound when no Limit
 
-      // Step 3: fetch only the paginated records with full relations
-      customers = await prisma.customer.findMany({
-        where: { id: { in: pageIds } },
-        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-        include: { AssignTo: true },
-      });
+  // Step 3: full fetch for just the page
+  customers = await prisma.customer.findMany({
+    where: { id: { in: pageIds } },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    include: { AssignTo: true },
+  });
 
-    } else {
-      // ── NORMAL FLOW when filtering by ContactNumber ───────────
-      // No distinct needed, standard pagination works correctly
-      totalRecords = await prisma.customer.count({ where });
+} else {
+  // Normal flow when filtering by ContactNumber
+  totalRecords = await prisma.customer.count({ where });
 
-      customers = await prisma.customer.findMany({
-        where,
-        orderBy,
-        skip: offset,
-        take: REQUIRED,
-        include: { AssignTo: true },
-      });
-    }
+  customers = await prisma.customer.findMany({
+    where,
+    orderBy,
+    skip: offset,
+    ...(Limit !== undefined && { take: REQUIRED }), // ← only apply take if Limit given
+    include: { AssignTo: true },
+  });
+}
 
     // --------------------------------------------
     // POST-FETCH FILTER + SORT BY CustomerDate
