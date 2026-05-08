@@ -26,7 +26,7 @@ server.listen(PORT, () => {
     } catch (err) {
       console.error("Sync error:", err);
     }
-  }, 10000);
+  }, 30000);
 
     // notification cleanup every 24 hours
   setInterval(async () => {
