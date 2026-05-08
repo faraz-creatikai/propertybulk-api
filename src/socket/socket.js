@@ -6,12 +6,15 @@ let io;
 export const initSocket = async (server) => {
   const { Server } = await import("socket.io");
   io = new Server(server, {
-    cors: {
-      origin: ALLOWED_ORIGINS,
-      methods: ["GET", "POST"],
-      credentials: true,
-    }
-  });
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket"],   // ← add this line
+  pingInterval: 25000,
+  pingTimeout: 20000,
+});
 
   io.on("connection", (socket) => {
     const adminId = socket.handshake.auth?.adminId;
